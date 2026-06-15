@@ -1,0 +1,18 @@
+{
+  "status": {
+    "level": "safe",
+    "triggeredAt": "",
+    "resolvedBy": ""
+  },
+  "sensors": {},
+  "receivers": {},
+  "settings": {
+    "customMessage": "I am in danger, please send help to my location immediately!"
+  },
+  "contacts": {
+    "contact1": {
+      "name": "Humama",
+      "phone": "+393509565222"
+    }
+  }
+}

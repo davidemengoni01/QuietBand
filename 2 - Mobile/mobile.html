@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>QuietBand Wearer</title>
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="theme-color" content="#0c1220">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <link rel="stylesheet" href="css/mobile.css">
+</head>
+<body>
+  <header class="m-header">
+    <div class="m-brand">QuietBand</div>
+    <div class="m-status-badge safe" id="mobileStatusBadge">SAFE</div>
+  </header>
+
+  <div class="m-content">
+    <!-- Receiver Awareness -->
+    <div class="m-card" style="padding: 12px 16px;">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <span style="font-size:13px; color:var(--muted);"><i class="fas fa-desktop"></i> Monitoring</span>
+        <span id="receiverStatus" class="receiver-status offline">No Receivers Online</span>
+      </div>
+    </div>
+
+    <div class="m-card">
+      <div class="m-card-title"><i class="fas fa-map-marker-alt"></i> My Location</div>
+      <div class="m-info-row"><span class="m-info-label">Coordinates</span><span class="m-info-value" id="mCoords">--, --</span></div>
+      <div class="m-info-row"><span class="m-info-label">Last Update</span><span class="m-info-value" id="mTime">--:--</span></div>
+    </div>
+
+    <div class="m-card" style="cursor: pointer;" onclick="openSettings()">
+      <div class="m-card-title"><i class="fas fa-user-shield"></i> Emergency Contact</div>
+      <div class="m-info-row"><span class="m-info-label">Name</span><span class="m-info-value" id="mCName">Not set</span></div>
+      <div class="m-info-row"><span class="m-info-label">Phone</span><span class="m-info-value" id="mCPhone">Not set</span></div>
+      <div style="text-align:center; margin-top:10px; font-size:12px; color:var(--muted);">Tap to edit <i class="fas fa-pen"></i></div>
+    </div>
+  </div>
+
+  <div class="m-actions">
+    <button class="sos-btn" id="mobileSosBtn"><i class="fas fa-exclamation-triangle"></i> SOS EMERGENCY</button>
+    <button class="safe-btn-small" id="mobileSafeBtn"><i class="fas fa-check-circle"></i> Cancel SOS (I am Safe)</button>
+  </div>
+
+  <div class="modal-overlay" id="settingsModal">
+    <div class="modal-sheet">
+      <div class="modal-handle"></div>
+      <h3 style="margin-bottom:16px;">Settings</h3>
+      <div style="margin-bottom:20px;">
+        <label style="font-size:12px; color:var(--muted); display:block; margin-bottom:6px;">CUSTOM SOS MESSAGE</label>
+        <textarea class="m-input" id="inputMessage" style="min-height:80px;"></textarea>
+        <button class="m-btn-save" style="margin-top:8px;" onclick="saveMobileSettings()">Save Message</button>
+      </div>
+      <div>
+        <label style="font-size:12px; color:var(--muted); display:block; margin-bottom:6px;">PRIMARY CONTACT</label>
+        <input type="text" class="m-input" id="inputName" placeholder="Contact Name">
+        <input type="tel" class="m-input" id="inputPhone" placeholder="+1234567890">
+        <button class="m-btn-save" onclick="saveMobileContact()">Save Contact</button>
+      </div>
+      <button style="width:100%; margin-top:16px; padding:12px; background:none; border:none; color:var(--muted); font-family:inherit; cursor:pointer;" onclick="closeSettings()">Close</button>
+    </div>
+  </div>
+
+  <script type="module" src="js/mobile.js"></script>
+</body>
+</html>
