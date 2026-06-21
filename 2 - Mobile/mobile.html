@@ -18,6 +18,13 @@
   </header>
 
   <div class="m-content">
+    <!-- Other Emergencies Banner -->
+    <div class="m-card" id="otherEmergencyBanner" style="display:none; padding: 12px 16px; background: rgba(239,68,68,0.1); border-color: rgba(239,68,68,0.3);">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <span style="font-size:13px; color:var(--accent);"><i class="fas fa-exclamation-triangle"></i> <span id="otherEmergencyText">Another sensor is in danger</span></span>
+      </div>
+    </div>
+
     <!-- Receiver Awareness -->
     <div class="m-card" style="padding: 12px 16px;">
       <div style="display:flex; justify-content:space-between; align-items:center;">
@@ -41,8 +48,9 @@
   </div>
 
   <div class="m-actions">
-    <button class="sos-btn" id="mobileSosBtn"><i class="fas fa-exclamation-triangle"></i> SOS EMERGENCY</button>
     <button class="safe-btn-small" id="mobileSafeBtn"><i class="fas fa-check-circle"></i> Cancel SOS (I am Safe)</button>
+    <button id="simulateBandBtn" style="width:100%; margin-top:10px; padding:10px; background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.3); border-radius:8px; color:var(--accent); font-family:inherit; font-size:12px; cursor:pointer;">⚠️ Manual Failsafe Trigger</button>
+    <p style="text-align:center; font-size:11px; color:var(--muted); margin-top:15px;">System is armed. Magnetic bracelet will trigger automatically.</p>
   </div>
 
   <div class="modal-overlay" id="settingsModal">

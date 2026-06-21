@@ -14,31 +14,49 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
 
-// Generate unique ID for this specific phone, save to localStorage so it persists
 const mySensorId = localStorage.getItem('qb_sensor_id') || 'sensor_' + Date.now();
 localStorage.setItem('qb_sensor_id', mySensorId);
 
 let currentLat = 41.9028;
 let currentLng = 12.4964;
 let whatsappSentForThisIncident = false;
+let myCurrentStatus = "safe";
+let currentBattery = 'N/A';
 
-// --- PRESENCE SYSTEM ---
-// Tell Firebase this phone is online. If it closes the tab, Firebase removes it automatically.
 const sensorRef = ref(db, '/sensors/' + mySensorId);
-set(sensorRef, { id: mySensorId, lat: currentLat, lng: currentLng, battery: 'N/A', lastUpdate: new Date().toLocaleTimeString() });
+set(sensorRef, { id: mySensorId, lat: currentLat, lng: currentLng, battery: 'N/A', status: 'safe', lastUpdate: new Date().toLocaleTimeString() });
 onDisconnect(sensorRef).remove();
+
+// --- WAKE LOCK (Prevents phone from sleeping) ---
+let wakeLock = null;
+async function requestWakeLock() {
+  try {
+    wakeLock = await navigator.wakeLock.request('screen');
+    document.addEventListener('visibilitychange', async () => {
+      if (wakeLock !== null && document.visibilityState === 'visible') {
+        wakeLock = await navigator.wakeLock.request('screen');
+      }
+    });
+  } catch (err) {}
+}
+requestWakeLock();
 
 // --- REAL BATTERY ---
 async function updateBattery() {
-  if (!navigator.getBattery) return;
-  const battery = await navigator.getBattery();
-  function update() {
-    const pct = Math.round(battery.level * 100);
-    // Update just the battery field in our sensor object
-    set(ref(db, '/sensors/' + mySensorId + '/battery'), pct);
+  if (!navigator.getBattery) {
+    currentBattery = 'Unsupported';
+    writeDeviceData();
+    return;
   }
-  update();
-  battery.addEventListener('levelchange', update);
+  try {
+    const battery = await navigator.getBattery();
+    function update() {
+      currentBattery = Math.round(battery.level * 100);
+      writeDeviceData();
+    }
+    update();
+    battery.addEventListener('levelchange', update);
+  } catch (e) {}
 }
 
 // --- MOBILE GPS ---
@@ -47,19 +65,18 @@ function writeDeviceData() {
     id: mySensorId,
     lat: currentLat,
     lng: currentLng,
-    battery: 'N/A', // Battery will overwrite this
+    battery: currentBattery,
+    status: myCurrentStatus,
     lastUpdate: new Date().toLocaleTimeString()
   });
 }
 
 if (navigator.geolocation) {
   navigator.geolocation.watchPosition(
-        (pos) => {
+    (pos) => {
       currentLat = pos.coords.latitude;
       currentLng = pos.coords.longitude;
       writeDeviceData(); 
-      
-      // FIX: Update UI immediately instead of waiting for Firebase
       document.getElementById('mCoords').textContent = currentLat.toFixed(4) + ', ' + currentLng.toFixed(4);
       document.getElementById('mTime').textContent = new Date().toLocaleTimeString();
     },
@@ -73,17 +90,22 @@ onValue(ref(db, '/'), (snap) => {
   const data = snap.val();
   if (!data) return;
 
-  // 1. Check Global Status
-  const status = data.status || {};
-  const level = status.level || 'safe';
+  const allSensors = data.sensors || {};
+  const myData = allSensors[mySensorId] || {};
+  myCurrentStatus = myData.status || 'safe';
+
   const badge = document.getElementById('mobileStatusBadge');
   const safeBtn = document.getElementById('mobileSafeBtn');
 
-  if (level === 'emergency') {
+  if (myCurrentStatus === 'emergency') {
     badge.textContent = 'SOS ACTIVE'; badge.className = 'm-status-badge emergency';
     document.body.classList.add('emergency-mode');
     safeBtn.classList.add('visible');
-    if (!whatsappSentForThisIncident) { sendWhatsAppAlert(data); whatsappSentForThisIncident = true; }
+    
+    if (!whatsappSentForThisIncident) { 
+      sendWhatsAppAlert(data); 
+      whatsappSentForThisIncident = true; 
+    }
   } else {
     badge.textContent = 'SAFE'; badge.className = 'm-status-badge safe';
     document.body.classList.remove('emergency-mode');
@@ -91,7 +113,24 @@ onValue(ref(db, '/'), (snap) => {
     whatsappSentForThisIncident = false;
   }
 
-  // 2. Check Who is receiving (Receivers List)
+  // Check for OTHER sensors in emergency
+  let otherEmergency = null;
+  for (let id in allSensors) {
+    if (id !== mySensorId && allSensors[id].status === 'emergency') {
+      otherEmergency = id;
+      break;
+    }
+  }
+  const banner = document.getElementById('otherEmergencyBanner');
+  if (banner) { // Null check to prevent crashes
+    if (otherEmergency) {
+      banner.style.display = 'block';
+      document.getElementById('otherEmergencyText').textContent = `Sensor ${otherEmergency} is in danger`;
+    } else {
+      banner.style.display = 'none';
+    }
+  }
+
   const receivers = data.receivers || {};
   const receiverCount = Object.keys(receivers).length;
   const recStatusEl = document.getElementById('receiverStatus');
@@ -103,41 +142,58 @@ onValue(ref(db, '/'), (snap) => {
     recStatusEl.className = 'receiver-status offline';
   }
 
-  // 3. Load Contacts/Settings
+  // --- HANDLE ALL CONTACTS ---
   const contacts = data.contacts || {};
-  const firstKey = Object.keys(contacts)[0];
-  if (firstKey) {
-    const c = contacts[firstKey];
+  const contactKeys = Object.keys(contacts);
+  
+  window._allContacts = [];
+  contactKeys.forEach(key => {
+    window._allContacts.push({
+      name: contacts[key].name,
+      phone: contacts[key].phone
+    });
+  });
+
+  if (contactKeys.length > 0) {
+    const c = contacts[contactKeys[0]];
     document.getElementById('mCName').textContent = c.name;
     document.getElementById('mCPhone').textContent = c.phone;
     document.getElementById('inputName').value = c.name;
     document.getElementById('inputPhone').value = c.phone;
-    window._contactPhone = c.phone;
-    window._contactKey = firstKey;
+    window._contactKey = contactKeys[0];
+  } else {
+    document.getElementById('mCName').textContent = 'Not set';
+    document.getElementById('mCPhone').textContent = 'Not set';
   }
+
   const settings = data.settings || {};
   window._customMessage = settings.customMessage || 'I am in danger, please send help!';
   document.getElementById('inputMessage').value = window._customMessage;
 });
 
-// --- WHATSAPP ALERT ---
+// --- WHATSAPP ALERT (SEND TO ALL) ---
 function sendWhatsAppAlert(data) {
-  const phone = window._contactPhone;
-  if (!phone) return;
+  if (!window._allContacts || window._allContacts.length === 0) return;
+  
   const customMsg = window._customMessage;
-  const msg = encodeURIComponent('🚨 QUIETBAND SOS EMERGENCY\n\n' + customMsg + '\n\nLocation: https://www.google.com/maps?q=' + currentLat + ',' + currentLng + '\nTime: ' + new Date().toLocaleString());
-  const clean = phone.replace(/[^\d+]/g, '').replace(/^\+/, '');
-  window.open('https://wa.me/' + clean + '?text=' + msg, '_blank');
+  const baseMsg = '🚨 QUIETBAND SOS EMERGENCY\n\n' + customMsg + '\n\nLocation: https://www.google.com/maps?q=' + currentLat + ',' + currentLng + '\nTime: ' + new Date().toLocaleString();
+  
+  window._allContacts.forEach(contact => {
+    const clean = contact.phone.replace(/[^\d+]/g, '').replace(/^\+/, '');
+    const msg = encodeURIComponent(baseMsg);
+    window.open('https://wa.me/' + clean + '?text=' + msg, '_blank');
+  });
 }
 
 // --- BUTTONS ---
-document.getElementById('mobileSosBtn').addEventListener('click', () => {
-  if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
-  set(ref(db, '/status'), { level: 'emergency', triggeredAt: new Date().toLocaleString(), resolvedBy: '' });
+document.getElementById('simulateBandBtn').addEventListener('click', () => {
+  myCurrentStatus = "emergency";
+  writeDeviceData();
 });
 
 document.getElementById('mobileSafeBtn').addEventListener('click', () => {
-  set(ref(db, '/status'), { level: 'safe', triggeredAt: '', resolvedBy: '' });
+  myCurrentStatus = "safe";
+  writeDeviceData();
 });
 
 // --- SETTINGS ---
@@ -146,4 +202,4 @@ window.saveMobileContact = function() { const n = document.getElementById('input
 window.openSettings = function() { document.getElementById('settingsModal').classList.add('active'); };
 window.closeSettings = function() { document.getElementById('settingsModal').classList.remove('active'); };
 
-updateBattery(); // Init battery tracking
+updateBattery(); 

@@ -1,9 +1,4 @@
 {
-  "status": {
-    "level": "safe",
-    "triggeredAt": "",
-    "resolvedBy": ""
-  },
   "sensors": {},
   "receivers": {},
   "settings": {

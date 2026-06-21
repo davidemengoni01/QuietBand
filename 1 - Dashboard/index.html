@@ -29,50 +29,43 @@
       <aside class="left-panel">
         <div class="status-card" id="statusCard">
           <div class="status-ring-wrap" id="ringWrap">
-            <div class="status-ring safe" id="statusRing"><i class="fas fa-shield-halved status-icon safe" id="statusIcon"> </i></div>
+            <div class="status-ring safe" id="statusRing"><i class="fas fa-shield-halved status-icon safe" id="statusIcon"></i></div>
           </div>
           <div class="status-label safe" id="statusLabel"> SAFE </div>
           <div class="status-sub" id="statusSub"> All systems normal </div>
+          <div id="emergencyTimer" style="font-size: 14px; color: var(--accent); font-family: var(--mono); margin-top: 5px; display: none;"> 00:00:00 </div>
         </div>
 
         <div class="info-card">
-          <div class="info-card-head"><i class="fas fa-satellite-dish"> Connected Wearers </i> </div>
+          <div class="info-card-head"><i class="fas fa-satellite-dish"></i> Connected Wearers</div>
           <div id="sensorListUI">
             <div style="font-size:12px; color:var(--muted);">No sensors online</div>
           </div>
         </div>
 
         <div class="info-card">
-          <div class="info-card-head"><i class="fas fa-user-shield"> Wearer Contact </i> </div>
-          <div class="contact-name" id="cName"> --- </div>
+          <div class="info-card-head"><i class="fas fa-user-shield"></i> Primary Emergency Contact</div>
+          <div class="contact-name" id="cName">---</div>
           <div class="contact-detail">
             <i class="fas fa-phone" style="font-size:11px"></i>
             <span id="cPhone">---</span>
           </div>
         </div>
-
-        <button class="btn btn-safe" id="resolveBtn" style="display:none;" onclick="resolveIncident()">
-          <i class="fas fa-check-circle"> Acknowledge & Resolve Incident </i> 
-        </button>
       </aside>
 
       <section class="right-panel">
         <div class="map-container">
           <div id="map"></div>
           <div class="map-overlay">
-            <div> LAT 
-              <span class="coords" id="mLat"> -- </span>
-            </div>
-            <div> LNG 
-              <span class="coords" id="mLng">--</span> 
-            </div>
+            <div>LAT <span class="coords" id="mLat">--</span></div>
+            <div>LNG <span class="coords" id="mLng">--</span></div>
           </div>
         </div>
 
         <div class="alert-log">
           <div class="alert-log-head"> 
-            <h3> Activity Log </h3> 
-            <span class="alert-badge" id="alertCount"> 0 </span>
+            <h3>Activity Log</h3> 
+            <span class="alert-badge" id="alertCount">0</span>
           </div>
           <div id="alertList"></div>
         </div>
@@ -81,23 +74,20 @@
 
     <div class="modal-overlay" id="settingsModal">
       <div class="modal-box">
-        <div class="modal-title"> Settings 
-          <button class="modal-close" onclick="document.getElementById('settingsModal').classList.remove('active')">&times; </button>
+        <div class="modal-title">Settings 
+          <button class="modal-close" onclick="document.getElementById('settingsModal').classList.remove('active')">&times;</button>
         </div>
-
         <div class="modal-section">
-          <div class="modal-section-title"> Custom SOS Message </div>
-          <textarea id="editMessage" class="m-input m-textarea"> </textarea>
-          <button class="m-btn m-btn-primary" onclick="saveMessage()"> Save </button>
+          <div class="modal-section-title">Custom SOS Message</div>
+          <textarea id="editMessage" class="m-input m-textarea"></textarea>
+          <button class="m-btn m-btn-primary" onclick="saveMessage()">Save</button>
         </div>
-
         <div class="modal-section">
-          <div class="modal-section-title"> Emergency Contacts </div>
+          <div class="modal-section-title">Emergency Contacts</div>
           <div id="contactListUI"></div>
         </div>
-        
         <div class="modal-section">
-          <div class="modal-section-title"> Add Contact </div>
+          <div class="modal-section-title">Add Contact</div>
           <input type="text" id="newName" class="m-input" placeholder="Full Name">
           <input type="tel" id="newPhone" class="m-input" placeholder="+1234567890">
           <button class="m-btn m-btn-success" onclick="addContact()">Add</button>
@@ -105,8 +95,8 @@
       </div>
     </div>
 
-    <div class="toast-container" id="toasts"> </div>
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"> </script>
-    <script type="module" src="js/dashboard.js"> </script>
+    <div class="toast-container" id="toasts"></div>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script type="module" src="js/dashboard.js"></script>
   </body>
 </html>

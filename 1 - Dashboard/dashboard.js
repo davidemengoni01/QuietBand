@@ -14,57 +14,79 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
 
-// Unique ID for this dashboard instance
 const myRecId = localStorage.getItem('qb_rec_id') || 'rec_' + Date.now();
 localStorage.setItem('qb_rec_id', myRecId);
 
 let map = null;
 let alerts = [];
-let previousStatus = "safe";
-let sensorMarkers = {}; // Track multiple map markers
+let previousEmergencySensors = new Set(); 
+let sensorMarkers = {}; 
 
-// --- PRESENCE SYSTEM ---
+// Timer Variables
+let emergencyStartTime = null;
+let timerInterval = null;
+
 const recRef = ref(db, '/receivers/' + myRecId);
 set(recRef, { online: true, lastSeen: new Date().toLocaleTimeString() });
 onDisconnect(recRef).remove();
 
-// --- MAP INIT ---
 function initMap() {
   map = L.map('map', { center: [41.9028, 12.4964], zoom: 14, zoomControl: false });
   L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { attribution: '&copy; OSM &copy; CARTO', maxZoom: 19 }).addTo(map);
   L.control.zoom({ position: 'bottomright' }).addTo(map);
 }
 
-// --- MAIN FIREBASE LISTENER ---
 onValue(ref(db, '/'), (snap) => {
   const data = snap.val();
   if (!data) return;
 
-  // 1. Global Status
-  const status = data.status || {};
-  const level = status.level || 'safe';
-  updateStatusUI(level);
-
-  // 2. Sensors / Multi-Device Tracking
   const sensors = data.sensors || {};
   const sensorListUI = document.getElementById('sensorListUI');
   sensorListUI.innerHTML = '';
   
-  // Clear old markers
   for (let id in sensorMarkers) { map.removeLayer(sensorMarkers[id]); }
   sensorMarkers = {};
 
+  let currentEmergencySensors = new Set();
+
   for (let id in sensors) {
     const s = sensors[id];
-    
-    // Add to List UI
-    sensorListUI.innerHTML += `<div class="sensor-list-item"><div class="sensor-id">${id}</div><div class="sensor-data">Batt: ${s.battery}% | Loc: ${parseFloat(s.lat).toFixed(3)}, ${parseFloat(s.lng).toFixed(3)}</div></div>`;
-    
-    // Add to Map
-    const cls = level === 'emergency' ? 'pin emergency' : 'pin safe';
+    const sensorStatus = s.status || 'safe';
+
+    if (sensorStatus === 'emergency') {
+      currentEmergencySensors.add(id);
+    }
+
+    // 1. Map Marker
+    const cls = sensorStatus === 'emergency' ? 'pin emergency' : 'pin safe';
     const marker = L.marker([s.lat, s.lng], { icon: L.divIcon({ className: cls, iconSize: [18, 18], iconAnchor: [9, 9] }) }).addTo(map);
     marker.bindPopup(`<b>Sensor:</b> ${id}<br><b>Battery:</b> ${s.battery}%`);
     sensorMarkers[id] = marker;
+
+    // 2. Action HTML (Must be defined BEFORE using it in sensorListUI.innerHTML)
+    let actionHTML = '';
+    if (sensorStatus === 'emergency') {
+      actionHTML = `<div class="sensor-right">
+        <div class="emergency-dot"></div>
+        <button class="resolve-btn-inline" onclick="resolveIncident('${id}')">Resolve</button>
+      </div>`;
+    } else {
+      actionHTML = `<div class="sensor-right"><div class="safe-dot"></div></div>`;
+    }
+
+    // 3. Battery Display Fix
+    const battDisplay = (s.battery && s.battery !== 'N/A' && s.battery !== 'Unsupported') ? `${s.battery}%` : s.battery;
+
+    // 4. Sidebar UI
+    sensorListUI.innerHTML += `
+      <div class="sensor-list-item">
+        <div class="sensor-left">
+          <div class="sensor-id">${id}</div>
+          <div class="sensor-data">Batt: ${battDisplay} | Loc: ${parseFloat(s.lat).toFixed(3)}, ${parseFloat(s.lng).toFixed(3)}</div>
+        </div>
+        ${actionHTML}
+      </div>
+    `;
   }
   
   if (Object.keys(sensors).length > 0) {
@@ -73,21 +95,25 @@ onValue(ref(db, '/'), (snap) => {
     document.getElementById('mLng').textContent = parseFloat(firstSensor.lng).toFixed(4);
   }
 
-  // 3. Contacts
+  // Update Global Dashboard UI
+  updateStatusUI(currentEmergencySensors.size);
+
+  // Fix Wearer Contact
   const contacts = data.contacts || {};
   const firstKey = Object.keys(contacts)[0];
   if (firstKey) {
     const c = contacts[firstKey];
     document.getElementById('cName').textContent = c.name || 'Not set';
     document.getElementById('cPhone').textContent = c.phone || 'Not set';
+  } else {
+    document.getElementById('cName').textContent = 'Not set';
+    document.getElementById('cPhone').textContent = 'Not set';
   }
 
-  // 4. Settings
   const settings = data.settings || {};
   document.getElementById('editMessage').value = settings.customMessage || '';
   window._customMessage = settings.customMessage;
 
-  // 5. Modal Contact List
   const listUI = document.getElementById('contactListUI');
   listUI.innerHTML = '';
   for (let key in contacts) {
@@ -97,37 +123,68 @@ onValue(ref(db, '/'), (snap) => {
 
   document.getElementById('connDot').className = 'indicator-dot';
 
-  // 6. AUTOMATIC ALARMS
-  if (level === 'emergency' && previousStatus !== 'emergency') {
-    playBeep(); pushNotify('emergency');
-    addAlert('danger', 'SOS DETECTED from ' + (Object.keys(sensors).length) + ' device(s)!');
-    showToast('danger', 'EMERGENCY ACTIVATED');
-  } else if (level === 'safe' && previousStatus !== 'safe') {
-    const resolvedBy = status.resolvedBy || 'System';
-    addAlert('safe', `Incident resolved by ${resolvedBy}`);
-    showToast('safe', 'System Safe');
+  // --- EMERGENCY TIMER LOGIC ---
+  if (currentEmergencySensors.size > 0 && previousEmergencySensors.size === 0) {
+      emergencyStartTime = Date.now();
+      document.getElementById('emergencyTimer').style.display = 'block';
+      startTimer();
+  } else if (currentEmergencySensors.size === 0 && previousEmergencySensors.size > 0) {
+      emergencyStartTime = null;
+      document.getElementById('emergencyTimer').style.display = 'none';
+      clearInterval(timerInterval);
+      document.getElementById('emergencyTimer').textContent = '00:00:00';
   }
-  previousStatus = level;
+
+  // --- ACTIVITY LOG & ALARMS ---
+  currentEmergencySensors.forEach(id => {
+    if (!previousEmergencySensors.has(id)) {
+      playBeep(); pushNotify('emergency');
+      addAlert('danger', `SOS DETECTED from ${id}!`);
+      showToast('danger', `EMERGENCY: ${id}`);
+    }
+  });
+
+  previousEmergencySensors.forEach(id => {
+    if (!currentEmergencySensors.has(id)) {
+      addAlert('safe', `${id} resolved.`);
+    }
+  });
+
+  if (currentEmergencySensors.size === 0 && previousEmergencySensors.size > 0) {
+    showToast('safe', 'All systems safe');
+  }
+
+  previousEmergencySensors = currentEmergencySensors;
 });
 
-// --- RECEIVER ACTIONS ---
-window.resolveIncident = function() {
-  set(ref(db, '/status'), { level: 'safe', triggeredAt: '', resolvedBy: myRecId });
-  document.body.classList.remove('emergency-mode');
+// Resolve button ONLY resets the specific sensor
+window.resolveIncident = function(sensorId) {
+  set(ref(db, '/sensors/' + sensorId + '/status'), 'safe');
 };
 
-// --- UI FUNCTIONS ---
-function updateStatusUI(status) {
-  const isEm = status === 'emergency';
+function updateStatusUI(activeEmergencyCount) {
+  const isEm = activeEmergencyCount > 0;
   document.getElementById('statusRing').className = 'status-ring ' + (isEm ? 'emergency' : 'safe');
   document.getElementById('ringWrap').className = 'status-ring-wrap' + (isEm ? ' emergency' : '');
   document.getElementById('statusIcon').className = 'fas ' + (isEm ? 'fa-exclamation-circle' : 'fa-shield-halved') + ' status-icon ' + (isEm ? 'emergency' : 'safe');
   document.getElementById('statusLabel').className = 'status-label ' + (isEm ? 'emergency' : 'safe');
   document.getElementById('statusLabel').textContent = isEm ? 'EMERGENCY' : 'SAFE';
-  document.getElementById('statusSub').textContent = isEm ? 'SOS signal active' : 'All systems normal';
+  document.getElementById('statusSub').textContent = isEm ? `${activeEmergencyCount} active SOS signal(s)` : 'All systems normal';
   document.getElementById('statusCard').className = 'status-card' + (isEm ? ' emergency' : '');
   if (isEm) document.body.classList.add('emergency-mode'); else document.body.classList.remove('emergency-mode');
-  document.getElementById('resolveBtn').style.display = isEm ? 'flex' : 'none';
+}
+
+// --- TIMER FUNCTION ---
+function startTimer() {
+    clearInterval(timerInterval);
+    timerInterval = setInterval(() => {
+        if (!emergencyStartTime) return;
+        let elapsed = Math.floor((Date.now() - emergencyStartTime) / 1000);
+        let hrs = String(Math.floor(elapsed / 3600)).padStart(2, '0');
+        let mins = String(Math.floor((elapsed % 3600) / 60)).padStart(2, '0');
+        let secs = String(elapsed % 60).padStart(2, '0');
+        document.getElementById('emergencyTimer').textContent = `${hrs}:${mins}:${secs}`;
+    }, 1000);
 }
 
 function pushNotify(s) { if (!('Notification' in window)) return; if (Notification.permission === 'granted') new Notification('QuietBand', { body: s === 'emergency' ? 'SOS EMERGENCY triggered!' : 'User is safe.' }); }
