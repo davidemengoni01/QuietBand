@@ -19,6 +19,10 @@ FirebaseConfig config;
 const int triggerPin = 4;   // pogo / input
 const int motorPin = 26;
 
+// ================= PATH =================
+String path = "";
+String sensorId = "";
+
 // ================= WIFI =================
 void connectWiFi() {
 
@@ -56,8 +60,13 @@ void initFirebase() {
 
 // ================= SEND STATUS =================
 bool sendStatus(const String &state) {
+  Serial.print("Sending status: ");
+  Serial.println(state);
+  Serial.print("To path: ");
+  Serial.println(path);
 
-  if (Firebase.RTDB.setString(&fbdo, "/status/level", state)) {
+
+  if (Firebase.RTDB.setString(&fbdo, path, state)) {
     Serial.print("Firebase → ");
     Serial.println(state);
     return true;
@@ -92,6 +101,9 @@ void checkReceivers() {
 
     json.iteratorEnd();
 
+    Serial.print("Receivers online: ");
+    Serial.println(receiversOnline ? "YES" : "NO");
+
   } else {
     receiversOnline = false;
   }
@@ -101,8 +113,14 @@ void checkReceivers() {
 bool safetyStatus = true;
 
 void checkSafety() {
+  String newPath = "/sensors/";
+  newPath += sensorId;
+  newPath += "/status";
 
-  if (Firebase.RTDB.getString(&fbdo, "/status/level")) {
+  Serial.print("Checking safety status at path: ");
+  Serial.println(newPath);
+  
+  if (Firebase.RTDB.getString(&fbdo, newPath)) {
     String status = fbdo.stringData();
     safetyStatus = (status != "emergency");
     Serial.print("Safety status: ");
@@ -128,14 +146,25 @@ void setup() {
   connectWiFi();
   initFirebase();
 
-  // stato iniziale
-  sendStatus("safe");
+  if (Firebase.RTDB.getString(&fbdo, "/hardware_bridge/activeSessionId")) {
+    sensorId = fbdo.stringData();
+    Serial.println("ActiveSessionId: ");
+    Serial.println(sensorId);
+
+    path = "/sensors/";
+    path += sensorId;
+    path += "/status";
+  } else {
+    Serial.println("Failed to get activeSessionId");
+  }
+
   triggered = false;
 }
 
 // ================= LOOP =================
 
 void loop() {
+  if (sensorId != "") {
     Serial.println("EMERGENCY TRIGGERED");
 
     if (triggered) 
@@ -167,5 +196,21 @@ void loop() {
       }
     }
 
-  delay(5000);
+    delay(5000);
+  } else {
+    if (Firebase.RTDB.getString(&fbdo, "/hardware_bridge/activeSessionId")) {
+      sensorId = fbdo.stringData();
+      Serial.println("ActiveSessionId: ");
+      Serial.println(sensorId);
+
+      path = "/sensors/";
+      path += sensorId;
+      path += "/status";
+    } else {
+      Serial.println("Failed to get activeSessionId");
+    }
+
+    delay(1000);
+  }
+
 }

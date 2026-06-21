@@ -16,6 +16,12 @@ const db = getDatabase(app);
 
 const mySensorId = localStorage.getItem('qb_sensor_id') || 'sensor_' + Date.now();
 localStorage.setItem('qb_sensor_id', mySensorId);
+// --- SHARE SESSION ID WITH ESP32 HARDWARE ---
+// Write the phone's sensor ID to a fixed path so the bracelet can read it
+set(ref(db, '/hardware_bridge'), {
+  activeSessionId: mySensorId,
+  lastConnected: new Date().toLocaleString()
+});
 
 let currentLat = 41.9028;
 let currentLng = 12.4964;
@@ -23,11 +29,19 @@ let whatsappSentForThisIncident = false;
 let myCurrentStatus = "safe";
 let currentBattery = 'N/A';
 
+// Register this sensor
 const sensorRef = ref(db, '/sensors/' + mySensorId);
-set(sensorRef, { id: mySensorId, lat: currentLat, lng: currentLng, battery: 'N/A', status: 'safe', lastUpdate: new Date().toLocaleTimeString() });
+set(sensorRef, {
+  id: mySensorId,
+  lat: currentLat,
+  lng: currentLng,
+  battery: 'N/A',
+  status: 'safe',
+  lastUpdate: new Date().toLocaleTimeString()
+});
 onDisconnect(sensorRef).remove();
 
-// --- WAKE LOCK (Prevents phone from sleeping) ---
+// --- WAKE LOCK ---
 let wakeLock = null;
 async function requestWakeLock() {
   try {
@@ -37,11 +51,13 @@ async function requestWakeLock() {
         wakeLock = await navigator.wakeLock.request('screen');
       }
     });
-  } catch (err) {}
+  } catch (err) {
+    console.warn('Wake Lock failed:', err);
+  }
 }
 requestWakeLock();
 
-// --- REAL BATTERY ---
+// --- BATTERY ---
 async function updateBattery() {
   if (!navigator.getBattery) {
     currentBattery = 'Unsupported';
@@ -56,10 +72,12 @@ async function updateBattery() {
     }
     update();
     battery.addEventListener('levelchange', update);
-  } catch (e) {}
+  } catch (e) {
+    console.warn('Battery API failed:', e);
+  }
 }
 
-// --- MOBILE GPS ---
+// --- GPS & DATA WRITER ---
 function writeDeviceData() {
   set(ref(db, '/sensors/' + mySensorId), {
     id: mySensorId,
@@ -80,40 +98,27 @@ if (navigator.geolocation) {
       document.getElementById('mCoords').textContent = currentLat.toFixed(4) + ', ' + currentLng.toFixed(4);
       document.getElementById('mTime').textContent = new Date().toLocaleTimeString();
     },
-    (err) => console.warn('GPS error:', err),
+    (err) => {
+      console.warn('GPS error:', err);
+      document.getElementById('mCoords').textContent = '⚠️ GPS denied';
+      document.getElementById('mCoords').style.color = 'var(--accent)';
+    },
     { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 }
   );
+} else {
+  document.getElementById('mCoords').textContent = '⚠️ GPS not supported';
+  document.getElementById('mCoords').style.color = 'var(--accent)';
 }
 
-// --- LISTEN TO FIREBASE ---
-onValue(ref(db, '/'), (snap) => {
-  const data = snap.val();
-  if (!data) return;
+// --- LISTEN: My own sensor status (for WhatsApp trigger) ---
+onValue(ref(db, '/sensors/' + mySensorId + '/status'), (snap) => {
+  myCurrentStatus = snap.val() || 'safe';
+  updateMobileUI();
+});
 
-  const allSensors = data.sensors || {};
-  const myData = allSensors[mySensorId] || {};
-  myCurrentStatus = myData.status || 'safe';
-
-  const badge = document.getElementById('mobileStatusBadge');
-  const safeBtn = document.getElementById('mobileSafeBtn');
-
-  if (myCurrentStatus === 'emergency') {
-    badge.textContent = 'SOS ACTIVE'; badge.className = 'm-status-badge emergency';
-    document.body.classList.add('emergency-mode');
-    safeBtn.classList.add('visible');
-    
-    if (!whatsappSentForThisIncident) { 
-      sendWhatsAppAlert(data); 
-      whatsappSentForThisIncident = true; 
-    }
-  } else {
-    badge.textContent = 'SAFE'; badge.className = 'm-status-badge safe';
-    document.body.classList.remove('emergency-mode');
-    safeBtn.classList.remove('visible');
-    whatsappSentForThisIncident = false;
-  }
-
-  // Check for OTHER sensors in emergency
+// --- LISTEN: All sensors (for "other emergency" banner) ---
+onValue(ref(db, '/sensors'), (snap) => {
+  const allSensors = snap.val() || {};
   let otherEmergency = null;
   for (let id in allSensors) {
     if (id !== mySensorId && allSensors[id].status === 'emergency') {
@@ -122,7 +127,7 @@ onValue(ref(db, '/'), (snap) => {
     }
   }
   const banner = document.getElementById('otherEmergencyBanner');
-  if (banner) { // Null check to prevent crashes
+  if (banner) {
     if (otherEmergency) {
       banner.style.display = 'block';
       document.getElementById('otherEmergencyText').textContent = `Sensor ${otherEmergency} is in danger`;
@@ -130,8 +135,11 @@ onValue(ref(db, '/'), (snap) => {
       banner.style.display = 'none';
     }
   }
+});
 
-  const receivers = data.receivers || {};
+// --- LISTEN: Receivers (online count) ---
+onValue(ref(db, '/receivers'), (snap) => {
+  const receivers = snap.val() || {};
   const receiverCount = Object.keys(receivers).length;
   const recStatusEl = document.getElementById('receiverStatus');
   if (receiverCount > 0) {
@@ -141,11 +149,13 @@ onValue(ref(db, '/'), (snap) => {
     recStatusEl.textContent = 'No Receivers Online';
     recStatusEl.className = 'receiver-status offline';
   }
+});
 
-  // --- HANDLE ALL CONTACTS ---
-  const contacts = data.contacts || {};
+// --- LISTEN: Contacts ---
+onValue(ref(db, '/contacts'), (snap) => {
+  const contacts = snap.val() || {};
   const contactKeys = Object.keys(contacts);
-  
+
   window._allContacts = [];
   contactKeys.forEach(key => {
     window._allContacts.push({
@@ -165,23 +175,58 @@ onValue(ref(db, '/'), (snap) => {
     document.getElementById('mCName').textContent = 'Not set';
     document.getElementById('mCPhone').textContent = 'Not set';
   }
+});
 
-  const settings = data.settings || {};
-  window._customMessage = settings.customMessage || 'I am in danger, please send help!';
+// --- LISTEN: Settings ---
+onValue(ref(db, '/settings/customMessage'), (snap) => {
+  window._customMessage = snap.val() || 'I am in danger, please send help!';
   document.getElementById('inputMessage').value = window._customMessage;
 });
 
-// --- WHATSAPP ALERT (SEND TO ALL) ---
-function sendWhatsAppAlert(data) {
-  if (!window._allContacts || window._allContacts.length === 0) return;
-  
-  const customMsg = window._customMessage;
-  const baseMsg = '🚨 QUIETBAND SOS EMERGENCY\n\n' + customMsg + '\n\nLocation: https://www.google.com/maps?q=' + currentLat + ',' + currentLng + '\nTime: ' + new Date().toLocaleString();
-  
-  window._allContacts.forEach(contact => {
+// --- UI UPDATE (called when my status changes) ---
+function updateMobileUI() {
+  const badge = document.getElementById('mobileStatusBadge');
+  const safeBtn = document.getElementById('mobileSafeBtn');
+
+  if (myCurrentStatus === 'emergency') {
+    badge.textContent = 'SOS ACTIVE';
+    badge.className = 'm-status-badge emergency';
+    document.body.classList.add('emergency-mode');
+    safeBtn.classList.add('visible');
+
+    if (!whatsappSentForThisIncident) {
+      sendWhatsAppAlert();
+      whatsappSentForThisIncident = true;
+    }
+  } else {
+    badge.textContent = 'SAFE';
+    badge.className = 'm-status-badge safe';
+    document.body.classList.remove('emergency-mode');
+    safeBtn.classList.remove('visible');
+    whatsappSentForThisIncident = false;
+  }
+}
+
+// --- WHATSAPP ALERT ---
+function sendWhatsAppAlert() {
+  if (!window._allContacts || window._allContacts.length === 0) {
+    console.warn('No contacts to alert');
+    return;
+  }
+
+  const customMsg = window._customMessage || 'I am in danger, please send help!';
+  const baseMsg = '🚨 QUIETBAND SOS EMERGENCY\n\n' +
+    customMsg + '\n\n' +
+    'Location: https://www.google.com/maps?q=' + currentLat + ',' + currentLng + '\n' +
+    'Time: ' + new Date().toLocaleString();
+
+  // Stagger WhatsApp opens to avoid popup blocker
+  window._allContacts.forEach((contact, index) => {
     const clean = contact.phone.replace(/[^\d+]/g, '').replace(/^\+/, '');
     const msg = encodeURIComponent(baseMsg);
-    window.open('https://wa.me/' + clean + '?text=' + msg, '_blank');
+    setTimeout(() => {
+      window.open('https://wa.me/' + clean + '?text=' + msg, '_blank');
+    }, index * 500); // 500ms delay between each
   });
 }
 
@@ -197,9 +242,25 @@ document.getElementById('mobileSafeBtn').addEventListener('click', () => {
 });
 
 // --- SETTINGS ---
-window.saveMobileSettings = function() { set(ref(db, '/settings/customMessage'), document.getElementById('inputMessage').value); alert("Saved!"); };
-window.saveMobileContact = function() { const n = document.getElementById('inputName').value; const p = document.getElementById('inputPhone').value; set(ref(db, '/contacts/' + (window._contactKey||'contact1')), { name: n, phone: p }); alert("Saved!"); closeSettings(); };
-window.openSettings = function() { document.getElementById('settingsModal').classList.add('active'); };
-window.closeSettings = function() { document.getElementById('settingsModal').classList.remove('active'); };
+window.saveMobileSettings = function() {
+  set(ref(db, '/settings/customMessage'), document.getElementById('inputMessage').value);
+  alert("Saved!");
+};
 
-updateBattery(); 
+window.saveMobileContact = function() {
+  const n = document.getElementById('inputName').value;
+  const p = document.getElementById('inputPhone').value;
+  set(ref(db, '/contacts/' + (window._contactKey || 'contact1')), { name: n, phone: p });
+  alert("Saved!");
+  closeSettings();
+};
+
+window.openSettings = function() {
+  document.getElementById('settingsModal').classList.add('active');
+};
+
+window.closeSettings = function() {
+  document.getElementById('settingsModal').classList.remove('active');
+};
+
+updateBattery();
